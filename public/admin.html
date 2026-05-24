@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理端 - 跑腿平台</title>
+<link rel="stylesheet" href="style.css">
+<style>.backup-bar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.backup-bar .btn{padding:8px 16px;font-size:13px}</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="nav-inner">
+    <span class="logo">⚙️ 管理端</span>
+    <div class="nav-right">
+      <span class="user-info" id="userInfo"></span>
+      <button class="btn btn-sm btn-outline" onclick="logout()">退出</button>
+    </div>
+  </div>
+</nav>
+<div class="container">
+  <!-- 备份 -->
+  <div class="card" style="background:#fffbeb;border:1px solid #fcd34d;">
+    <h3>💾 数据备份 <span style="font-size:11px;color:#b45309;font-weight:400;">（服务器重启后数据会丢失，请定期备份）</span></h3>
+    <div class="backup-bar">
+      <button class="btn btn-sm btn-primary" onclick="exportDB()">📥 导出备份</button>
+      <button class="btn btn-sm btn-outline" onclick="document.getElementById('importFile').click()">📤 恢复备份</button>
+      <input type="file" id="importFile" style="display:none" accept=".json" onchange="importDB(this)">
+      <span style="font-size:11px;color:#999;" id="backupTime"></span>
+    </div>
+  </div>
+
+  <div class="stat-grid" id="statsGrid"></div>
+
+  <div class="card" id="pendingPayCard" style="display:none;">
+    <h3>💳 待确认收款</h3>
+    <div class="table-wrap"><table><thead><tr><th>任务</th><th>报酬</th><th>发布者</th><th>操作</th></tr></thead><tbody id="pendingPayTable"></tbody></table></div>
+  </div>
+
+  <div class="card" id="pendingWithdrawCard" style="display:none;">
+    <h3>💸 待打款提现</h3>
+    <div class="table-wrap"><table><thead><tr><th>跑腿员</th><th>金额</th><th>操作</th></tr></thead><tbody id="pendingWithdrawTable"></tbody></table></div>
+  </div>
+
+  <div class="card"><h3>👥 用户管理</h3>
+    <div class="table-wrap"><table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>手机</th><th>余额</th><th>操作</th></tr></thead><tbody id="userTable"></tbody></table></div>
+  </div>
+
+  <div class="card"><h3>📋 全部任务</h3>
+    <div class="table-wrap"><table><thead><tr><th>ID</th><th>标题</th><th>报酬</th><th>付款</th><th>状态</th><th>发布者</th><th>接单者</th><th>操作</th></tr></thead><tbody id="taskTable"></tbody></table></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+const user = JSON.parse(localStorage.getItem('errand_user') || '{}');
+if (!user.id || user.role !== 'admin') window.location.href = 'index.html';
+document.getElementById('userInfo').textContent = '👤 ' + user.username;
+
+function toast(m,t){const d=document.createElement('div');d.className='toast '+t;d.textContent=m;document.body.appendChild(d);setTimeout(()=>d.remove(),2500);}
+function logout(){localStorage.clear();window.location.href='index.html';}
+
+async function exportDB(){
+  try{
+    const r = await fetch(API+'/api/admin/db-export');
+    const d = await r.json();
+    const blob = new Blob([JSON.stringify(d)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'errand-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+    document.getElementById('backupTime').textContent = '上次备份: '+new Date().toLocaleString();
+    localStorage.setItem('lastBackup', Date.now());
+    toast('备份已下载','s');
+  }catch(e){toast('导出失败','e');}
+}
+
+async function importDB(input){
+  const file = input.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const d = JSON.parse(text);
+    await fetch(API+'/api/admin/db-import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+    toast('数据恢复成功！','s');
+    loadAll();
+  }catch(e){toast('恢复失败：文件格式不正确','e');}
+  input.value = '';
+}
+
+async function loadAll(){
+  const [stats,users,tasks,withdraws] = await Promise.all([
+    fetch(API+'/api/admin/stats').then(r=>r.json()),
+    fetch(API+'/api/admin/users').then(r=>r.json()),
+    fetch(API+'/api/admin/tasks').then(r=>r.json()),
+    fetch(API+'/api/admin/withdraws').then(r=>r.json())
+  ]);
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="num">${stats.totalUsers}</div><div class="label">总用户</div></div>
+    <div class="stat-card"><div class="num">${stats.totalRunners}</div><div class="label">跑腿</div></div>
+    <div class="stat-card"><div class="num">${stats.totalTasks}</div><div class="label">总任务</div></div>
+    <div class="stat-card"><div class="num">${stats.completedTasks}</div><div class="label">已完成</div></div>
+    <div class="stat-card"><div class="num">¥${stats.totalReward}</div><div class="label">总流水</div></div>
+    <div class="stat-card"><div class="num">${stats.pendingWithdraws||0}</div><div class="label">待打款</div></div>`;
+
+  const pp = tasks.filter(t=>t.paid===1);
+  const ppc = document.getElementById('pendingPayCard');
+  if(pp.length){ ppc.style.display='';
+    document.getElementById('pendingPayTable').innerHTML = pp.map(t=>
+      `<tr><td>${esc(t.title)}</td><td>¥${t.reward}</td><td>${esc(t.client_name)}</td>
+      <td><button class="btn btn-sm btn-success" onclick="confirmPaid(${t.id})">确认收款</button></td></tr>`).join('');
+  } else ppc.style.display='none';
+
+  const pw = withdraws.filter(w=>w.status==='pending');
+  const pwc = document.getElementById('pendingWithdrawCard');
+  if(pw.length){ pwc.style.display='';
+    document.getElementById('pendingWithdrawTable').innerHTML = pw.map(w=>
+      `<tr><td>${esc(w.username)}</td><td>¥${w.amount}</td>
+      <td><button class="btn btn-sm btn-success" onclick="confirmWithdraw(${w.id})">已打款</button></td></tr>`).join('');
+  } else pwc.style.display='none';
+
+  document.getElementById('userTable').innerHTML = users.map(u=>
+    `<tr><td>${u.id}</td><td>${esc(u.username)}</td>
+    <td><span class="badge badge-${u.role==='admin'?'completed':u.role==='runner'?'accepted':'pending'}">${{user:'用户',runner:'跑腿',admin:'管理员'}[u.role]}</span></td>
+    <td>${esc(u.phone||'-')}</td><td>¥${(u.balance||0).toFixed(2)}</td>
+    <td>${u.role!=='admin'?`<button class="btn btn-sm btn-danger" onclick="delUser(${u.id})">删除</button>`:'-'}</td></tr>`).join('');
+
+  document.getElementById('taskTable').innerHTML = tasks.map(t=>
+    `<tr><td>${t.id}</td><td>${esc(t.title)}</td><td>¥${t.reward}</td>
+    <td>${t.paid===0?'待付':t.paid===1?'待确认':'已确认'}</td>
+    <td><span class="badge badge-${t.status}">${{pending:'待接单',accepted:'进行中',completed:'已完成',cancelled:'已取消'}[t.status]}</span></td>
+    <td>${esc(t.client_name||'-')}</td><td>${esc(t.runner_name||'-')}</td>
+    <td><button class="btn btn-sm btn-danger" onclick="delTask(${t.id})">删除</button></td></tr>`).join('');
+
+  const lb = localStorage.getItem('lastBackup');
+  if(lb) document.getElementById('backupTime').textContent = '上次备份: '+new Date(parseInt(lb)).toLocaleString();
+}
+
+async function confirmPaid(id){ await fetch(API+'/api/tasks/'+id+'/confirm-paid',{method:'POST'}); toast('已确认','s'); loadAll(); }
+async function confirmWithdraw(id){ await fetch(API+'/api/admin/withdraw/'+id+'/confirm',{method:'POST'}); toast('已打款','s'); loadAll(); }
+async function delUser(id){ if(!confirm('确认删除？'))return; await fetch(API+'/api/admin/users/'+id,{method:'DELETE'}); loadAll(); }
+async function delTask(id){ if(!confirm('确认删除？'))return; await fetch(API+'/api/admin/tasks/'+id,{method:'DELETE'}); loadAll(); }
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "跑腿接单",
+  "short_name": "跑腿",
+  "description": "跑腿接单平台 - 发布任务，接单赚钱",
+  "start_url": "/app.html",
+  "display": "standalone",
+  "background_color": "#f5f6fa",
+  "theme_color": "#4a6cf7",
+  "orientation": "portrait",
+  "icons": [{
+    "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%234a6cf7' width='100' height='100' rx='20'/><text x='50' y='68' text-anchor='middle' font-size='55'>🏃</text></svg>",
+    "sizes": "100x100",
+    "type": "image/svg+xml",
+    "purpose": "any maskable"
+  }]
+}
